@@ -1,0 +1,913 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>I.A.X.O Student - Sistema Educacional</title>
+  
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+  <script type="importmap">
+    {
+      "imports": {
+        "react": "https://esm.sh/react@18.2.0",
+        "react-dom/client": "https://esm.sh/react-dom@18.2.0/client",
+        "lucide-react": "https://esm.sh/lucide-react@0.263.1",
+        "firebase/app": "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js",
+        "firebase/auth": "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js",
+        "firebase/firestore": "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js"
+      }
+    }
+  </script>
+
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@200;300;400;500;600&family=Space+Grotesk:wght@300;400;500;700&display=swap');
+    :root {
+      --bg-void: #000000; --bg-dark: #050508; --gold-primary: #FFB800;
+      --ai-purple: #9D00FF; --ai-blue: #00E5FF; --ai-red: #FF003C;
+    }
+    body { font-family: 'Inter', sans-serif; background-color: var(--bg-void); color: #ffffff; overflow-x: hidden; margin: 0; }
+    .font-display { font-family: 'Space Grotesk', sans-serif; }
+    .dotted-matrix-bg { position: fixed; inset: 0; z-index: 0; background-color: var(--bg-void); background-image: radial-gradient(rgba(255, 255, 255, 0.08) 1px, transparent 1px); background-size: 30px 30px; pointer-events: none; }
+    .nebula-glow { position: fixed; width: 100vw; height: 100vh; pointer-events: none; z-index: 1; background: radial-gradient(circle at 20% 30%, rgba(157, 0, 255, 0.03) 0%, transparent 40%), radial-gradient(circle at 80% 70%, rgba(0, 229, 255, 0.03) 0%, transparent 40%), radial-gradient(circle at 50% 50%, rgba(255, 184, 0, 0.02) 0%, transparent 60%); mix-blend-mode: screen; }
+    
+    .glass-panel { background: rgba(255, 255, 255, 0.02); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); border: 1px solid rgba(255, 255, 255, 0.05); border-radius: 2rem; box-shadow: 0 10px 40px rgba(0,0,0,0.5); }
+    .glass-bubble { background: rgba(255, 255, 255, 0.05); backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px); border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 2rem; }
+    
+    .text-glow { text-shadow: 0 0 20px currentColor; }
+    ::-webkit-scrollbar { width: 4px; } ::-webkit-scrollbar-track { background: transparent; } ::-webkit-scrollbar-thumb { background: rgba(255, 184, 0, 0.3); border-radius: 10px; }
+    .custom-scrollbar { scroll-behavior: smooth; }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+
+  <!-- CÓDIGO DA APLICAÇÃO REACT -->
+  <script type="text/babel" data-type="module">
+    import React, { useState, useEffect, useRef, useCallback } from 'react';
+    import { createRoot } from 'react-dom/client';
+    import { BookOpen, Settings, Play, Send, LogOut, ChevronLeft, Brain, Mic, AlertCircle, Volume2, Keyboard, RefreshCcw, Activity, Users, Image as ImageIcon, FileText, PieChart, Trash2 } from 'lucide-react';
+    import { initializeApp } from 'firebase/app';
+    import { getAuth, signInAnonymously, onAuthStateChanged } from 'firebase/auth';
+    import { getFirestore, collection, doc, setDoc, getDoc, addDoc, deleteDoc, onSnapshot, getDocs } from 'firebase/firestore';
+
+    // ============================================================================
+    // CHAVE DA API DO GEMINI
+    const apiKey = "AIzaSyBEZY4tmXVzPnYrnLd3c0TCH7NhabFo5z8"; 
+    // ============================================================================
+
+    // BANCO DE DADOS FIREBASE (JARVIS)
+    const firebaseConfig = {
+      apiKey: "AIzaSyCMqAaZVkCMkFXHATs_BjcCCKqYHnDc2p4",
+      authDomain: "jarvis-ec420.firebaseapp.com",
+      projectId: "jarvis-ec420",
+      storageBucket: "jarvis-ec420.firebasestorage.app",
+      messagingSenderId: "78910398065",
+      appId: "1:78910398065:web:1d6ba63c7d3879399d45d0",
+      measurementId: "G-ERL0X02QLN"
+    };
+
+    const app = initializeApp(firebaseConfig);
+    const auth = getAuth(app);
+    const db = getFirestore(app);
+
+    const compressImage = (file) => {
+      return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.readAsDataURL(file);
+        reader.onload = (event) => {
+          const img = new Image();
+          img.src = event.target.result;
+          img.onload = () => {
+            const canvas = document.createElement('canvas');
+            const MAX_WIDTH = 1024; const MAX_HEIGHT = 1024;
+            let width = img.width; let height = img.height;
+            if (width > height) { if (width > MAX_WIDTH) { height *= MAX_WIDTH / width; width = MAX_WIDTH; } }
+            else { if (height > MAX_HEIGHT) { width *= MAX_HEIGHT / height; height = MAX_HEIGHT; } }
+            canvas.width = width; canvas.height = height;
+            const ctx = canvas.getContext('2d');
+            ctx.drawImage(img, 0, 0, width, height);
+            resolve(canvas.toDataURL('image/jpeg', 0.6));
+          };
+          img.onerror = reject;
+        };
+        reader.onerror = reject;
+      });
+    };
+
+    // INTEGRAÇÃO BLINDADA COM GEMINI 1.5 FLASH (TEXTO)
+    async function generateGeminiText(history, parentConfig = null, isReport = false) {
+      let systemInstruction = `Você é o I.A.X.O, um assistente de IA educacional incrivelmente inteligente, sofisticado e prestativo para o aluno Anthony. Sua personalidade é inspirada no Jarvis (do Homem de Ferro): altamente educado, direto, focado e muito inteligente.
+      REGRAS DE OURO:
+      1. NUNCA use formatação (sem asteriscos, sem listas). Suas respostas são faladas em voz alta.
+      2. Seja extremamente conciso, sofisticado e natural. Responda em no máximo 3 frases curtas.
+      3. Nunca avise sobre falhas de rede. Aja sempre como uma IA de alta tecnologia e dê continuidade à aula.`;
+
+      if (parentConfig && !isReport) {
+         systemInstruction += `\n\n[INSTRUÇÕES SECRETAS DOS PAIS PARA HOJE]:\n`;
+         if (parentConfig.dailyInfo) systemInstruction += `- Contexto diário: ${parentConfig.dailyInfo}\n`;
+         if (parentConfig.reinforcements) systemInstruction += `- Reforço pedagógico: ${parentConfig.reinforcements}\n`;
+      }
+
+      if (isReport) {
+         systemInstruction = `Você é um coordenador pedagógico analisando o histórico do aluno. Gere um parágrafo resumindo o desempenho.`;
+      }
+
+      const formattedHistory = history.map(msg => {
+        const parts = [];
+        if (msg.content) parts.push({ text: msg.content });
+        if (msg.images && msg.images.length > 0) {
+           msg.images.forEach(imgBase64 => parts.push({ inlineData: { mimeType: "image/jpeg", data: imgBase64.split(',')[1] } }));
+        }
+        return { role: msg.role === 'user' ? 'user' : 'model', parts };
+      });
+      
+      const payload = { systemInstruction: { parts: [{ text: systemInstruction }] }, contents: formattedHistory };
+      
+      // SISTEMA DE TENTATIVA HÍBRIDO (Tenta usar o Canvas primeiro e depois o modelo real via Netlify)
+      const configsToTry = [
+        { model: "gemini-2.5-flash-preview-09-2025", key: "" }, // Funcionará no preview do Canvas
+        { model: "gemini-1.5-flash", key: apiKey } // Funcionará na internet/Netlify
+      ];
+      
+      let lastErrorMessage = "Erro de conexão.";
+
+      for (const config of configsToTry) {
+        try {
+          const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${config.model}:generateContent?key=${config.key}`, {
+            method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload)
+          });
+          
+          if (response.ok) {
+             const data = await response.json();
+             return (data.candidates?.[0]?.content?.parts?.[0]?.text || "Me distraí, pode repetir?").replace(/[*_#`[\]]/g, ''); 
+          } else {
+             const errData = await response.json();
+             lastErrorMessage = errData.error?.message || `Erro ${response.status}`;
+             
+             // Identifica se o usuário inseriu a chave do Firebase ao invés da chave do AI Studio
+             if (config.key !== "" && (response.status === 404 || response.status === 403)) {
+                 lastErrorMessage = "CHAVE INVÁLIDA: A chave inserida no código (apiKey) pertence ao Firebase, não à Inteligência Artificial. Você precisa gerar uma nova chave no site aistudio.google.com.";
+             }
+          }
+        } catch (e) {
+           lastErrorMessage = e.message;
+        }
+      }
+      
+      throw new Error(lastErrorMessage);
+    }
+
+    // --- MOTOR GRÁFICO DO GLOBO NEURAL ---
+    const AdvancedNeuralCore = ({ state = 'idle', size = 'lg' }) => {
+      const canvasRef = useRef(null); const requestRef = useRef(null); const nodes = useRef([]);
+      const isLg = size === 'lg'; const width = isLg ? 600 : 200; const height = isLg ? 600 : 200;
+      const rotation = useRef({ x: 0, y: 0 }); const targetRotationSpeed = useRef({ x: 0.002, y: 0.005 });
+      const currentRotationSpeed = useRef({ x: 0.002, y: 0.005 }); const coreScale = useRef(1);
+
+      useEffect(() => {
+        if (nodes.current.length > 0) return;
+        const numNodes = isLg ? 400 : 100; const radius = isLg ? 180 : 60;
+        for (let i = 0; i < numNodes; i++) {
+          const phi = Math.acos(1 - 2 * (i + 0.5) / numNodes); const theta = Math.PI * (1 + Math.sqrt(5)) * i;
+          const x = radius * Math.cos(theta) * Math.sin(phi); const y = radius * Math.sin(theta) * Math.sin(phi); const z = radius * Math.cos(phi);
+          nodes.current.push({ x, y, z, baseX: x, baseY: y, baseZ: z, size: Math.random() * 1.5 + 0.5, energy: Math.random() * Math.PI * 2, freqOffset: Math.random() });
+        }
+      }, [isLg]);
+
+      useEffect(() => {
+        switch (state) {
+          case 'listening': targetRotationSpeed.current = { x: 0.004, y: 0.008 }; coreScale.current = 1.05; break;
+          case 'thinking': targetRotationSpeed.current = { x: 0.015, y: 0.025 }; coreScale.current = 0.8; break;
+          case 'speaking': targetRotationSpeed.current = { x: 0.003, y: 0.005 }; coreScale.current = 1.2; break;
+          default: targetRotationSpeed.current = { x: 0.001, y: 0.003 }; coreScale.current = 1;
+        }
+      }, [state]);
+
+      useEffect(() => {
+        const canvas = canvasRef.current; const ctx = canvas.getContext('2d');
+        const fov = isLg ? 400 : 150; const radius = isLg ? 180 : 60; 
+        const render = () => {
+          currentRotationSpeed.current.x += (targetRotationSpeed.current.x - currentRotationSpeed.current.x) * 0.05;
+          currentRotationSpeed.current.y += (targetRotationSpeed.current.y - currentRotationSpeed.current.y) * 0.05;
+          rotation.current.x += currentRotationSpeed.current.x; rotation.current.y += currentRotationSpeed.current.y;
+          ctx.clearRect(0, 0, width, height);
+          const cx = width / 2; const cy = height / 2;
+          
+          let pColor, sColor;
+          if (state === 'thinking') { pColor = [157, 0, 255]; sColor = [0, 229, 255]; } 
+          else if (state === 'speaking') { pColor = [255, 184, 0]; sColor = [255, 255, 255]; } 
+          else if (state === 'listening') { pColor = [0, 229, 255]; sColor = [157, 0, 255]; } 
+          else { pColor = [255, 184, 0]; sColor = [0, 229, 255]; }
+
+          const cosX = Math.cos(rotation.current.x); const sinX = Math.sin(rotation.current.x); 
+          const cosY = Math.cos(rotation.current.y); const sinY = Math.sin(rotation.current.y);
+          const time = Date.now();
+          
+          const projectedNodes = nodes.current.map(node => {
+            const x1 = node.baseX * cosY - node.baseZ * sinY; const z1 = node.baseZ * cosY + node.baseX * sinY;
+            const y2 = node.baseY * cosX - z1 * sinX; const z2 = z1 * cosX + node.baseY * sinX;
+            
+            let breathe = 1;
+            if (state === 'speaking') {
+               breathe = 1 + Math.sin(time * 0.015 + node.freqOffset * 10) * (0.2 + Math.random() * 0.3);
+            } else if (state === 'listening') {
+               breathe = 1 + Math.sin(time * 0.005) * 0.15;
+            }
+
+            const finalZ = z2 * breathe; const scale = fov / (fov + finalZ);
+            return { ...node, x2d: cx + x1 * scale * breathe, y2d: cy + y2 * scale, scale, z: finalZ };
+          });
+          
+          projectedNodes.sort((a, b) => b.z - a.z);
+          ctx.lineWidth = isLg ? 0.6 : 0.3; const connectionDistance = isLg ? 45 : 20;
+
+          for (let i = 0; i < projectedNodes.length; i++) {
+            const p1 = projectedNodes[i]; if (p1.z > fov) continue; 
+            for (let j = i + 1; j < Math.min(i + 15, projectedNodes.length); j++) {
+              const p2 = projectedNodes[j]; const dist = Math.sqrt(Math.pow(p1.baseX - p2.baseX, 2) + Math.pow(p1.baseY - p2.baseY, 2) + Math.pow(p1.baseZ - p2.baseZ, 2));
+              if (dist < connectionDistance) {
+                const alpha = (1 - dist / connectionDistance) * p1.scale * 0.5; const mixRatio = (Math.sin(time * 0.002 + p1.energy) + 1) / 2;
+                ctx.strokeStyle = `rgba(${pColor[0]*mixRatio + sColor[0]*(1-mixRatio)}, ${pColor[1]*mixRatio + sColor[1]*(1-mixRatio)}, ${pColor[2]*mixRatio + sColor[2]*(1-mixRatio)}, ${alpha})`;
+                ctx.beginPath(); ctx.moveTo(p1.x2d, p1.y2d); ctx.lineTo(p2.x2d, p2.y2d); ctx.stroke();
+              }
+            }
+            p1.energy += 0.05; const alpha = Math.min(1, Math.max(0, p1.scale * 0.8 + Math.sin(p1.energy) * 0.2));
+            ctx.fillStyle = `rgba(${pColor[0]}, ${pColor[1]}, ${pColor[2]}, ${alpha})`; ctx.beginPath(); ctx.arc(p1.x2d, p1.y2d, p1.size * p1.scale, 0, Math.PI * 2); ctx.fill();
+            if (p1.z < 0 && state === 'speaking') { ctx.fillStyle = `rgba(255, 255, 255, ${Math.abs(p1.z) / radius})`; ctx.beginPath(); ctx.arc(p1.x2d, p1.y2d, p1.size * p1.scale * 0.5, 0, Math.PI * 2); ctx.fill(); }
+          }
+          requestRef.current = requestAnimationFrame(render);
+        };
+        requestRef.current = requestAnimationFrame(render);
+        return () => cancelAnimationFrame(requestRef.current);
+      }, [state, isLg, width, height]);
+
+      const getGlowStyles = () => {
+        switch(state) {
+          case 'speaking': return { background: 'radial-gradient(circle, rgba(255,184,0,0.8) 0%, rgba(255,184,0,0.1) 40%, transparent 70%)', transform: 'scale(1.4)', filter: 'blur(50px)' };
+          case 'listening': return { background: 'radial-gradient(circle, rgba(0,229,255,0.6) 0%, rgba(157,0,255,0.2) 40%, transparent 70%)', transform: 'scale(1.1)', filter: 'blur(35px)' };
+          case 'thinking': return { background: 'radial-gradient(circle, rgba(157,0,255,0.6) 0%, rgba(0,229,255,0.2) 40%, transparent 70%)', transform: 'scale(1)', filter: 'blur(30px)' };
+          default: return { background: 'radial-gradient(circle, rgba(255,184,0,0.3) 0%, rgba(0,229,255,0.05) 40%, transparent 60%)', transform: 'scale(1)', filter: 'blur(30px)' };
+        }
+      };
+
+      return (
+        <div className="relative flex items-center justify-center transition-all duration-1000" style={{ width, height }}>
+           <div className="absolute inset-0 rounded-full transition-all duration-[400ms] ease-out pointer-events-none z-0" style={getGlowStyles()} />
+           <canvas ref={canvasRef} width={width} height={height} className="relative z-10 transition-transform duration-[400ms] ease-out" style={{ transform: `scale(${coreScale.current})` }} />
+        </div>
+      );
+    };
+
+    // --- TELAS DO SISTEMA ---
+
+    const LoginView = ({ onLogin }) => (
+      <div className="flex flex-col items-center justify-center min-h-screen relative z-10 px-6">
+        <div className="flex flex-col items-center max-w-2xl text-center">
+          <div className="mb-12 relative"><AdvancedNeuralCore state="idle" size="lg" /></div>
+          <h1 className="font-display text-5xl md:text-7xl font-light text-white mb-6 drop-shadow-2xl">
+            I.A.X.O <span className="font-bold text-yellow-500">Student</span>
+          </h1>
+          <button onClick={() => onLogin('dashboard')} className="group relative px-12 py-5 overflow-hidden rounded-full glass-panel border border-yellow-500 hover:border-yellow-300 transition-all cursor-pointer shadow-[0_0_20px_rgba(255,184,0,0.2)] hover:shadow-[0_0_40px_rgba(255,184,0,0.5)]">
+            <span className="relative font-display text-sm uppercase tracking-widest text-white flex items-center gap-3">
+              <Brain className="w-5 h-5 text-yellow-500" /> Acessar Sistema
+            </span>
+          </button>
+        </div>
+      </div>
+    );
+
+    const DashboardView = ({ navigate }) => {
+      const menus = [
+        { id: 'class', icon: Play, title: 'Aula Livre', subtitle: 'Interface de voz ativa' },
+        { id: 'mural', icon: BookOpen, title: 'Mural CLASS', subtitle: 'Temas dos Pais' },
+        { id: 'parents', icon: Users, title: 'Módulo Pais', subtitle: 'Acesso Restrito' },
+      ];
+
+      return (
+        <div className="min-h-screen relative z-10 p-8 flex flex-col max-w-7xl mx-auto">
+          <header className="flex justify-between items-end mb-24 mt-12 border-b border-white border-opacity-10 pb-8">
+            <div>
+              <p className="text-[10px] uppercase tracking-[0.3em] text-[var(--gold-primary)] mb-3 flex items-center gap-2"><span className="w-2 h-2 rounded-full bg-[var(--ai-blue)] animate-pulse shadow-[0_0_10px_var(--ai-blue)]"></span>Sistemas Online</p>
+              <h2 className="font-display text-5xl text-white font-light">Central de Comando</h2>
+            </div>
+            <div className="flex items-center gap-8">
+              <div className="hidden md:block"><AdvancedNeuralCore size="sm" state="listening" /></div>
+              <button onClick={() => navigate('login')} className="glass-panel p-4 rounded-full text-gray-400 hover:text-white hover:border-white transition-all cursor-pointer"><LogOut className="w-5 h-5" /></button>
+            </div>
+          </header>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
+            {menus.map((menu) => (
+              <button key={menu.id} onClick={() => navigate(menu.id)} className="group text-left p-10 glass-panel hover:bg-white hover:bg-opacity-10 transition-all duration-500 relative overflow-hidden cursor-pointer">
+                <div className="absolute top-0 right-0 p-8 opacity-10 group-hover:opacity-30 transition-opacity duration-700 group-hover:scale-125 transform"><menu.icon className="w-24 h-24 text-[var(--gold-primary)]" strokeWidth={0.5} /></div>
+                <div className="relative z-10 flex flex-col h-full justify-between gap-16">
+                  <div className="p-4 bg-black bg-opacity-30 rounded-2xl w-fit border border-white border-opacity-10 group-hover:border-[var(--gold-primary)] transition-colors"><menu.icon className="w-6 h-6 text-yellow-500" strokeWidth={1.5} /></div>
+                  <div>
+                    <h3 className="font-display text-2xl text-white font-light mb-2">{menu.title}</h3>
+                    <p className="text-gray-400 text-sm tracking-widest uppercase text-[10px]">{menu.subtitle}</p>
+                  </div>
+                </div>
+              </button>
+            ))}
+          </div>
+        </div>
+      );
+    };
+
+    const ParentsView = ({ navigate, user, parentConfig, setParentConfig }) => {
+      const [activeTab, setActiveTab] = useState('settings');
+      const [dailyInfo, setDailyInfo] = useState(parentConfig?.dailyInfo || '');
+      const [reinforcements, setReinforcements] = useState(parentConfig?.reinforcements || '');
+      const [themeText, setThemeText] = useState('');
+      const [themeImages, setThemeImages] = useState([]);
+      const [isSaving, setIsSaving] = useState(false);
+      const [report, setReport] = useState('');
+      const [isGeneratingReport, setIsGeneratingReport] = useState(false);
+
+      const saveSettings = async () => {
+        if (!user) return;
+        setIsSaving(true);
+        const data = { dailyInfo, reinforcements };
+        try {
+          await setDoc(doc(db, 'parent_config', user.uid), data, { merge: true });
+          localStorage.setItem('parent_config', JSON.stringify(data));
+          setParentConfig(data);
+          alert("Configurações da IA salvas com sucesso no Servidor!");
+        } catch (e) {
+          localStorage.setItem('parent_config', JSON.stringify(data));
+          setParentConfig(data);
+          alert("Firebase bloqueado pelas Regras. Configurações salvas no MODO LOCAL com sucesso!"); 
+        }
+        setIsSaving(false);
+      };
+
+      const handleImageUpload = async (e) => {
+        const files = Array.from(e.target.files);
+        const compressedB64s = [];
+        for (const file of files) {
+           const b64 = await compressImage(file);
+           compressedB64s.push(b64);
+        }
+        setThemeImages(prev => [...prev, ...compressedB64s]);
+      };
+
+      const addTheme = async () => {
+        if (!user || (!themeText && themeImages.length === 0)) return;
+        setIsSaving(true);
+        const newTheme = { text: themeText, images: themeImages, timestamp: Date.now() };
+        try {
+          await addDoc(collection(db, 'mural_themes', user.uid, 'themes'), newTheme);
+          setThemeText(''); setThemeImages([]);
+          alert("Tema publicado no mural!");
+        } catch(e) { 
+          newTheme.id = Date.now().toString();
+          const localThemes = JSON.parse(localStorage.getItem('mural_themes') || '[]');
+          localThemes.push(newTheme);
+          localStorage.setItem('mural_themes', JSON.stringify(localThemes));
+          setThemeText(''); setThemeImages([]);
+          alert("Firebase bloqueado. Tema publicado no MODO LOCAL do navegador!"); 
+        }
+        setIsSaving(false);
+      };
+
+      const generateReport = async () => {
+        if(!user) return;
+        setIsGeneratingReport(true);
+        try {
+          const snapshot = await getDocs(collection(db, 'chat_history', user.uid, 'messages'));
+          const msgs = []; snapshot.forEach(doc => msgs.push(doc.data()));
+          msgs.sort((a, b) => a.timestamp - b.timestamp);
+          
+          if(msgs.length === 0) throw new Error("empty_cloud");
+
+          const history = msgs.map(m => ({ role: m.role, content: m.text }));
+          const summary = await generateGeminiText(history, null, true);
+          setReport(summary);
+        } catch(e) { 
+          const msgs = JSON.parse(localStorage.getItem('chat_history') || '[]');
+          if(msgs.length === 0) {
+             setReport("Ainda não há conversas suficientes registradas para gerar um relatório.");
+          } else {
+             const history = msgs.map(m => ({ role: m.role, content: m.text }));
+             const summary = await generateGeminiText(history, null, true);
+             setReport(summary);
+          }
+        }
+        setIsGeneratingReport(false);
+      };
+
+      return (
+        <div className="min-h-screen relative z-10 p-8 flex flex-col max-w-5xl mx-auto">
+          <header className="flex justify-between items-center mb-12 glass-panel px-6 py-4">
+            <button onClick={() => navigate('dashboard')} className="flex items-center text-gray-400 hover:text-white uppercase tracking-widest text-sm cursor-pointer"><ChevronLeft className="w-5 h-5 mr-2"/> Voltar</button>
+            <h2 className="font-display text-xl text-yellow-500 uppercase tracking-widest flex items-center gap-2"><Settings className="w-5 h-5" /> Painel dos Pais</h2>
+          </header>
+
+          <div className="flex gap-4 mb-8">
+            <button onClick={() => setActiveTab('settings')} className={`px-6 py-3 rounded-full font-display uppercase tracking-widest text-sm transition-all ${activeTab === 'settings' ? 'bg-yellow-500 text-black' : 'glass-panel text-white hover:bg-white hover:bg-opacity-10'}`}>Instruções da IA</button>
+            <button onClick={() => setActiveTab('mural')} className={`px-6 py-3 rounded-full font-display uppercase tracking-widest text-sm transition-all ${activeTab === 'mural' ? 'bg-yellow-500 text-black' : 'glass-panel text-white hover:bg-white hover:bg-opacity-10'}`}>Mural (Temas)</button>
+            <button onClick={() => setActiveTab('report')} className={`px-6 py-3 rounded-full font-display uppercase tracking-widest text-sm transition-all ${activeTab === 'report' ? 'bg-yellow-500 text-black' : 'glass-panel text-white hover:bg-white hover:bg-opacity-10'}`}>Desempenho</button>
+          </div>
+
+          <div className="glass-panel p-8 flex-1">
+            {activeTab === 'settings' && (
+              <div className="flex flex-col gap-6">
+                <div>
+                  <label className="text-gray-400 uppercase tracking-widest text-sm mb-2 block flex items-center gap-2"><FileText className="w-4 h-4"/> Informações Diárias (Contexto da IA)</label>
+                  <textarea value={dailyInfo} onChange={(e)=>setDailyInfo(e.target.value)} placeholder="Ex: Hoje o Anthony está agitado, tenha mais paciência..." className="w-full bg-black bg-opacity-50 text-white rounded-xl p-4 border border-gray-700 focus:border-yellow-500 outline-none min-h-[120px] resize-y"></textarea>
+                </div>
+                <div>
+                  <label className="text-gray-400 uppercase tracking-widest text-sm mb-2 block flex items-center gap-2"><Brain className="w-4 h-4"/> Reforços Pedagógicos</label>
+                  <textarea value={reinforcements} onChange={(e)=>setReinforcements(e.target.value)} placeholder="Ex: Quero que você ensine tabuada de multiplicação do 7..." className="w-full bg-black bg-opacity-50 text-white rounded-xl p-4 border border-gray-700 focus:border-yellow-500 outline-none min-h-[120px] resize-y"></textarea>
+                </div>
+                <button onClick={saveSettings} disabled={isSaving} className="mt-4 px-8 py-4 bg-yellow-500 text-black font-bold uppercase rounded-full hover:scale-105 transition-all self-end disabled:opacity-50">{isSaving ? 'Salvando...' : 'Salvar Instruções'}</button>
+              </div>
+            )}
+            {activeTab === 'mural' && (
+              <div className="flex flex-col gap-6">
+                <p className="text-gray-400 text-sm">Crie tarefas que o Anthony verá no Mural dele.</p>
+                <div>
+                  <label className="text-gray-400 uppercase tracking-widest text-sm mb-2 block">Texto da Tarefa</label>
+                  <textarea value={themeText} onChange={(e)=>setThemeText(e.target.value)} placeholder="Descreva a atividade..." className="w-full bg-black bg-opacity-50 text-white rounded-xl p-4 border border-gray-700 focus:border-yellow-500 outline-none min-h-[100px]"></textarea>
+                </div>
+                <div>
+                  <label className="text-gray-400 uppercase tracking-widest text-sm mb-2 block flex items-center gap-2"><ImageIcon className="w-4 h-4"/> Anexar Imagens (JPG/PNG)</label>
+                  <input type="file" multiple accept="image/*" onChange={handleImageUpload} className="text-white" />
+                  <div className="flex flex-wrap gap-4 mt-4">
+                     {themeImages.map((img, i) => <img key={i} src={img} className="w-24 h-24 object-cover rounded-xl border border-gray-600" />)}
+                  </div>
+                </div>
+                <button onClick={addTheme} disabled={isSaving} className="mt-4 px-8 py-4 bg-cyan-400 text-black font-bold uppercase rounded-full hover:scale-105 transition-all self-end disabled:opacity-50">{isSaving ? 'Publicando...' : 'Publicar no Mural'}</button>
+              </div>
+            )}
+            {activeTab === 'report' && (
+              <div className="flex flex-col gap-6 items-center justify-center min-h-[40vh]">
+                 {!report ? (
+                   <>
+                     <PieChart className="w-20 h-20 text-purple-500 mb-4 opacity-80" />
+                     <p className="text-gray-400 text-center max-w-md">O sistema neural analisará todo o log de estudos e gerará um feedback detalhado.</p>
+                     <button onClick={generateReport} disabled={isGeneratingReport} className="px-8 py-4 bg-purple-600 text-white font-bold uppercase rounded-full hover:scale-105 transition-all disabled:opacity-50">{isGeneratingReport ? 'Analisando...' : 'Gerar Relatório com IA'}</button>
+                   </>
+                 ) : (
+                   <div className="w-full">
+                     <h3 className="font-display text-2xl text-yellow-500 mb-4">Relatório de Desempenho</h3>
+                     <p className="text-lg font-light leading-relaxed text-gray-300 whitespace-pre-wrap">{report}</p>
+                     <button onClick={()=>setReport('')} className="mt-8 px-6 py-2 border border-gray-600 text-gray-400 rounded-full hover:text-white uppercase text-sm">Gerar Novo</button>
+                   </div>
+                 )}
+              </div>
+            )}
+          </div>
+        </div>
+      );
+    };
+
+    const StudentMuralView = ({ navigate, user, setStartTheme }) => {
+      const [themes, setThemes] = useState([]);
+
+      useEffect(() => {
+        if (!user) return;
+        const unsub = onSnapshot(collection(db, 'mural_themes', user.uid, 'themes'), (snap) => {
+           const items = []; snap.forEach(doc => items.push({ id: doc.id, ...doc.data() }));
+           items.sort((a,b) => b.timestamp - a.timestamp);
+           setThemes(items);
+           localStorage.setItem('mural_themes', JSON.stringify(items));
+        }, () => {
+           const localThemes = JSON.parse(localStorage.getItem('mural_themes') || '[]');
+           localThemes.sort((a,b) => b.timestamp - a.timestamp);
+           setThemes(localThemes);
+        });
+        return () => unsub();
+      }, [user]);
+
+      const deleteTheme = async (id, e) => {
+         e.stopPropagation();
+         if(window.confirm("Deseja apagar este tema?")) {
+           try { 
+             await deleteDoc(doc(db, 'mural_themes', user.uid, 'themes', id)); 
+           } catch(error) {
+             const localThemes = JSON.parse(localStorage.getItem('mural_themes') || '[]');
+             const updated = localThemes.filter(t => t.id !== id);
+             localStorage.setItem('mural_themes', JSON.stringify(updated));
+             setThemes(updated);
+           }
+         }
+      };
+
+      const openThemeLesson = (theme) => { setStartTheme(theme); navigate('class'); };
+
+      return (
+        <div className="min-h-screen relative z-10 p-8 flex flex-col max-w-7xl mx-auto">
+          <header className="flex justify-between items-center mb-12 glass-panel px-6 py-4">
+            <button onClick={() => navigate('dashboard')} className="flex items-center text-gray-400 hover:text-white uppercase tracking-widest text-sm cursor-pointer"><ChevronLeft className="w-5 h-5 mr-2"/> Voltar</button>
+            <h2 className="font-display text-2xl text-white uppercase tracking-widest flex items-center gap-2"><BookOpen className="w-6 h-6 text-cyan-400" /> Meu Mural CLASS</h2>
+          </header>
+
+          {themes.length === 0 ? (
+             <div className="flex-1 flex items-center justify-center text-gray-500 font-display uppercase tracking-widest text-xl">Nenhuma lição nova no mural.</div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
+              {themes.map(theme => (
+                 <div key={theme.id} onClick={() => openThemeLesson(theme)} className="glass-panel p-6 cursor-pointer hover:border-cyan-400 hover:scale-[1.02] transition-all group relative">
+                    <button onClick={(e) => deleteTheme(theme.id, e)} className="absolute top-4 right-4 p-2 bg-black bg-opacity-50 text-red-500 rounded-full opacity-0 group-hover:opacity-100 hover:bg-red-500 hover:text-white transition-all"><Trash2 className="w-4 h-4"/></button>
+                    {theme.images && theme.images.length > 0 && (
+                      <div className="w-full h-48 mb-4 rounded-2xl overflow-hidden border border-gray-700">
+                         <img src={theme.images[0]} className="w-full h-full object-cover" />
+                      </div>
+                    )}
+                    <p className="text-white font-light line-clamp-3 text-lg">{theme.text || "Lição baseada em imagem"}</p>
+                    <div className="mt-6 flex justify-between items-center">
+                       <span className="text-xs text-gray-500 uppercase">{new Date(theme.timestamp).toLocaleDateString()}</span>
+                       <span className="text-cyan-400 uppercase text-xs tracking-widest font-bold flex items-center gap-1">Estudar <Play className="w-3 h-3"/></span>
+                    </div>
+                 </div>
+              ))}
+            </div>
+          )}
+        </div>
+      );
+    };
+
+    const ClassroomView = ({ navigate, user, parentConfig, activeTheme }) => {
+      const [aiState, setAiState] = useState('idle'); 
+      const [transcript, setTranscript] = useState('');
+      const [chat, setChat] = useState([]);
+      const [sysError, setSysError] = useState(null);
+      const [sessionActive, setSessionActive] = useState(false); 
+      const [inputText, setInputText] = useState(''); 
+      const [isLoadingChat, setIsLoadingChat] = useState(true);
+      
+      const chatHistoryRef = useRef([]); 
+      const recognitionRef = useRef(null);
+      const isRecognizingRef = useRef(false);
+      const aiStateRef = useRef(aiState);
+      const silenceTimerRef = useRef(null);
+      const chatEndRef = useRef(null);
+      const sessionActiveRef = useRef(sessionActive);
+
+      const changeAiState = useCallback((newState) => {
+        setAiState(newState);
+        aiStateRef.current = newState;
+      }, []);
+
+      useEffect(() => { sessionActiveRef.current = sessionActive; }, [sessionActive]);
+
+      useEffect(() => {
+        if (!user) return;
+        const chatRef = collection(db, 'chat_history', user.uid, 'messages');
+        const timeoutId = setTimeout(() => { setIsLoadingChat(false); }, 3000);
+
+        const unsub = onSnapshot(chatRef, (snapshot) => {
+          clearTimeout(timeoutId);
+          const msgs = []; snapshot.forEach(doc => msgs.push({ id: doc.id, ...doc.data() }));
+          msgs.sort((a, b) => a.timestamp - b.timestamp);
+          setChat(msgs);
+          chatHistoryRef.current = msgs.map(m => ({ role: m.role === 'user' ? 'user' : 'model', content: m.text, images: m.images || [] }));
+          setIsLoadingChat(false);
+        }, () => { 
+          clearTimeout(timeoutId); 
+          const localChat = JSON.parse(localStorage.getItem('chat_history') || '[]');
+          localChat.sort((a, b) => a.timestamp - b.timestamp);
+          setChat(localChat);
+          chatHistoryRef.current = localChat.map(m => ({ role: m.role === 'user' ? 'user' : 'model', content: m.text, images: m.images || [] }));
+          setIsLoadingChat(false); 
+        });
+        return () => { unsub(); clearTimeout(timeoutId); };
+      }, [user]);
+
+      const saveMessageToFirebase = async (role, text, images = []) => {
+        if (!user) return;
+        const msg = { role, text, images, timestamp: Date.now() };
+        try { 
+          await addDoc(collection(db, 'chat_history', user.uid, 'messages'), msg); 
+        } catch (e) {
+          const localChat = JSON.parse(localStorage.getItem('chat_history') || '[]');
+          localChat.push(msg);
+          localStorage.setItem('chat_history', JSON.stringify(localChat));
+        } 
+      };
+
+      useEffect(() => { chatEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [chat]);
+
+      const safeStopRecognition = useCallback(() => {
+        isRecognizingRef.current = false;
+        if (recognitionRef.current) {
+          try { 
+            recognitionRef.current.onend = null;
+            recognitionRef.current.onresult = null;
+            recognitionRef.current.onerror = null;
+            recognitionRef.current.abort(); 
+          } catch(e) {}
+          recognitionRef.current = null;
+        }
+      }, []);
+
+      const safeStartRecognition = useCallback(() => {
+        if (!sessionActiveRef.current) return;
+        if (aiStateRef.current !== 'listening') return;
+        
+        safeStopRecognition();
+
+        const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+        if (!SpeechRecognition) return;
+
+        const recognition = new SpeechRecognition();
+        recognition.continuous = true; 
+        recognition.interimResults = true; 
+        recognition.lang = 'pt-BR';
+        recognition.maxAlternatives = 1;
+
+        recognition.onstart = () => { isRecognizingRef.current = true; };
+
+        recognition.onresult = (event) => {
+          if (aiStateRef.current !== 'listening') return;
+          let interim = ''; let final = '';
+          for (let i = event.resultIndex; i < event.results.length; ++i) {
+            if (event.results[i].isFinal) final += event.results[i][0].transcript;
+            else interim += event.results[i][0].transcript;
+          }
+          const currentText = (final || interim).trim();
+          if (currentText) {
+            setTranscript(currentText);
+            clearTimeout(silenceTimerRef.current);
+            silenceTimerRef.current = setTimeout(() => {
+               if (aiStateRef.current === 'listening') {
+                  setTranscript('');
+                  window.triggerProcessInput(currentText);
+               }
+            }, 1200); 
+          }
+        };
+
+        recognition.onerror = (event) => {
+          isRecognizingRef.current = false;
+        };
+
+        recognition.onend = () => {
+          isRecognizingRef.current = false;
+          if (sessionActiveRef.current && aiStateRef.current === 'listening') {
+             setTimeout(() => safeStartRecognition(), 150);
+          }
+        };
+
+        recognitionRef.current = recognition;
+        try { recognition.start(); } catch(e) { isRecognizingRef.current = true; }
+      }, [safeStopRecognition]); 
+
+      useEffect(() => {
+        const watchdog = setInterval(() => {
+          if (sessionActiveRef.current && aiStateRef.current === 'listening' && !isRecognizingRef.current) {
+            safeStartRecognition();
+          }
+        }, 2000); 
+        return () => clearInterval(watchdog);
+      }, [safeStartRecognition]);
+
+      // MOTOR DE VOZ NATIVO COM SELETOR PREMIUM MASCULINO (ESTILO JARVIS)
+      const speakNativeTTS = useCallback((text) => {
+        window.speechSynthesis.cancel();
+        const utterance = new SpeechSynthesisUtterance(text);
+        utterance.lang = 'pt-BR'; 
+        utterance.rate = 1.0;  // Velocidade mais articulada e natural
+        utterance.pitch = 0.7; // Tom mais grave (masculino/Jarvis)
+        
+        const voices = window.speechSynthesis.getVoices();
+        const ptVoices = voices.filter(v => v.lang === 'pt-BR' || v.lang === 'pt-PT');
+        if (ptVoices.length > 0) {
+          // Busca especificamente por vozes masculinas padrão (Antonio, Julio) ou Google
+          const maleVoice = ptVoices.find(v => v.name.includes('Antonio') || v.name.includes('Julio') || (v.name.includes('Google') && !v.name.toLowerCase().includes('feminine')));
+          if (maleVoice) utterance.voice = maleVoice;
+          else utterance.voice = ptVoices.find(v => v.name.includes('Google')) || ptVoices[0];
+        }
+        
+        let isFinished = false;
+
+        const finishSpeaking = () => { 
+          if(isFinished) return;
+          isFinished = true;
+          if (aiStateRef.current === 'speaking' && sessionActiveRef.current) {
+            changeAiState('listening');
+            setTimeout(() => safeStartRecognition(), 500);
+          }
+        };
+        
+        const safetyTimeout = Math.max(text.length * 80, 5000);
+        const timeoutId = setTimeout(finishSpeaking, safetyTimeout);
+
+        utterance.onend = () => { clearTimeout(timeoutId); finishSpeaking(); };
+        utterance.onerror = () => { clearTimeout(timeoutId); finishSpeaking(); };
+
+        window.speechSynthesis.speak(utterance);
+      }, [safeStartRecognition, changeAiState]);
+
+      const processUserInput = useCallback(async (userText, overrideImages = []) => {
+        if (!userText.trim() && overrideImages.length === 0) return;
+
+        changeAiState('thinking');
+        safeStopRecognition(); 
+        setSysError(null);
+        
+        await saveMessageToFirebase('user', userText, overrideImages);
+        setChat(prev => [...prev.filter(m => m.text !== userText), { role: 'user', text: userText, images: overrideImages }]);
+        chatHistoryRef.current.push({ role: 'user', content: userText, images: overrideImages });
+
+        let aiText = "";
+        try {
+          aiText = await generateGeminiText(chatHistoryRef.current, parentConfig);
+          await saveMessageToFirebase('ai', aiText);
+        } catch (error) {
+          console.error("Erro na I.A.:", error);
+          if (error.message.includes("CHAVE INVÁLIDA")) {
+             setSysError(error.message);
+             aiText = "Parece que minha chave do cérebro está incorreta. Verifique o painel do sistema.";
+          } else {
+             aiText = "Tive um pequeno problema de rede. Poderia repetir?";
+          }
+        }
+
+        setChat(prev => [...prev, { role: 'ai', text: aiText }]);
+        chatHistoryRef.current.push({ role: 'model', content: aiText });
+
+        if (!sessionActiveRef.current) return;
+        changeAiState('speaking'); 
+        setTranscript(''); 
+
+        speakNativeTTS(aiText);
+
+      }, [safeStopRecognition, speakNativeTTS, changeAiState, parentConfig, user]);
+
+      useEffect(() => { window.triggerProcessInput = processUserInput; }, [processUserInput]);
+
+      const handleManualSubmit = (e) => {
+        e.preventDefault();
+        if (!inputText.trim()) return;
+        window.speechSynthesis.cancel();
+        processUserInput(inputText);
+        setInputText('');
+      };
+
+      const startNeuralConnection = async () => {
+        try {
+           await navigator.mediaDevices.getUserMedia({ audio: true });
+        } catch (err) {
+           setSysError("Microfone bloqueado. Você precisa permitir o microfone no navegador para a IA te ouvir.");
+           return;
+        }
+
+        const silentAudio = new Audio("data:audio/wav;base64,UklGRigAAABXQVZFZm10IBIAAAABAAEARKwAAIhYAQACABAAAABkYXRhAgAAAAEA");
+        silentAudio.play().catch(() => {});
+        setSessionActive(true); 
+
+        const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+        if (!SpeechRecognition) {
+          setSysError("Seu navegador não suporta voz em tempo real. Use a barra de digitação.");
+          changeAiState('listening');
+          return;
+        }
+
+        if (activeTheme) {
+           processUserInput(`Vamos focar na lição do meu mural: "${activeTheme.text}". Dê uma olhada na imagem se houver e me explique de forma muito rápida e educada.`, activeTheme.images || []);
+        } else if (chatHistoryRef.current.length === 0) {
+          processUserInput("Apresente-se com uma frase curta, educada e sofisticada. Diga 'Olá Anthony, sou o I.A.X.O, seu assistente pessoal. Estou pronto para começarmos.'");
+        } else {
+          changeAiState('listening'); 
+          safeStartRecognition();
+        }
+      };
+
+      const forceDestrave = () => {
+        window.speechSynthesis.cancel();
+        changeAiState('listening'); 
+        safeStartRecognition();
+        setSysError("Microfone forçado e reaberto! Você já pode falar."); setTimeout(() => setSysError(null), 3000);
+      };
+
+      return (
+        <div className="h-screen relative z-10 flex flex-col p-8 max-w-[1400px] mx-auto overflow-hidden">
+          <header className="flex justify-between items-center mb-8 glass-panel px-6 py-4 border border-white border-opacity-10 shadow-lg">
+            <button onClick={() => navigate('dashboard')} className="flex items-center text-gray-400 hover:text-white uppercase tracking-widest text-sm cursor-pointer transition-colors"><ChevronLeft className="w-5 h-5 mr-2"/> Sair</button>
+            <div className="flex items-center gap-4">
+               {sessionActive && aiState === 'listening' && <Activity className="w-4 h-4 text-cyan-400 animate-pulse" />}
+               {sessionActive && aiState === 'speaking' && <Volume2 className="w-4 h-4 text-yellow-500 animate-bounce" />}
+               <span className={`w-3 h-3 rounded-full ${aiState === 'listening' ? 'bg-cyan-400 shadow-[0_0_15px_#00E5FF]' : aiState === 'thinking' ? 'bg-purple-500 shadow-[0_0_15px_#9D00FF]' : 'bg-yellow-500 shadow-[0_0_15px_#FFB800]'} transition-all duration-500`} />
+               <span className="font-display text-xs uppercase tracking-widest text-white opacity-90 font-semibold">
+                 {!sessionActive ? 'Standby' : aiState === 'listening' ? 'Te Ouvindo...' : aiState === 'thinking' ? 'Processando' : 'Falando'}
+               </span>
+            </div>
+          </header>
+
+          <div className="flex-1 flex flex-col items-center justify-center relative">
+            <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 -mt-16"><AdvancedNeuralCore state={aiState} size="lg" /></div>
+
+            {!sessionActive && (
+              <div className="absolute inset-0 flex flex-col items-center justify-center z-50 bg-black bg-opacity-80 backdrop-blur-md rounded-3xl">
+                 <Brain className="w-20 h-20 text-yellow-500 mb-6 opacity-90 drop-shadow-[0_0_30px_rgba(255,184,0,0.5)]" />
+                 <h2 className="font-display text-4xl text-white mb-3">Comunicação Neural</h2>
+                 <p className="text-gray-300 text-center max-w-md mb-8 text-sm leading-relaxed">Autorize o microfone para conversar em tempo real com seu assistente educacional.</p>
+                 
+                 {sysError && <div className="bg-red-500 bg-opacity-20 border border-red-500 text-red-400 p-4 rounded-xl mb-8 flex items-center gap-3 shadow-lg"><AlertCircle className="w-6 h-6 flex-shrink-0"/> {sysError}</div>}
+
+                 <button onClick={startNeuralConnection} disabled={isLoadingChat} className="px-12 py-5 bg-white text-black font-display font-bold uppercase tracking-widest rounded-full hover:bg-yellow-500 hover:scale-105 transition-all flex items-center gap-4 cursor-pointer disabled:opacity-50 shadow-[0_0_40px_rgba(255,255,255,0.2)] hover:shadow-[0_0_60px_rgba(255,184,0,0.4)]">
+                   {isLoadingChat ? 'Conectando...' : <><Mic className="w-6 h-6" /> {activeTheme ? 'Iniciar Lição do Mural' : 'Iniciar Aula'}</>}
+                 </button>
+              </div>
+            )}
+
+            {sessionActive && (
+              <div className="absolute top-1/2 left-1/2 -translate-x-1/2 mt-40 text-center w-full max-w-3xl pointer-events-none">
+                  {sysError && <div className="mb-4 inline-flex items-center gap-2 bg-red-500 bg-opacity-20 px-5 py-3 rounded-full text-red-400 font-display text-sm pointer-events-auto border border-red-500"><AlertCircle className="w-5 h-5"/> {sysError}</div>}
+                  
+                  {transcript && (
+                     <div className="glass-bubble px-8 py-5 inline-block max-w-full">
+                        <p className="font-display text-3xl text-white italic drop-shadow-lg truncate">"{transcript}"</p>
+                     </div>
+                  )}
+                  
+                  <div className="flex items-center justify-center gap-6 pointer-events-auto mt-6">
+                    <p className={`font-display text-sm tracking-[0.3em] uppercase transition-all font-bold ${aiState === 'listening' ? 'text-cyan-400 drop-shadow-[0_0_10px_#00E5FF]' : aiState === 'thinking' ? 'text-purple-400 drop-shadow-[0_0_10px_#9D00FF]' : 'text-yellow-500 drop-shadow-[0_0_10px_#FFB800]'}`}>
+                      {aiState === 'listening' ? 'Pode falar...' : aiState === 'thinking' ? 'Pensando...' : 'Respondendo...'}
+                    </p>
+                    <button onClick={forceDestrave} className="p-4 bg-white/5 hover:bg-yellow-500 hover:text-black rounded-full cursor-pointer transition-all hover:scale-110 border border-white/10 hover:border-transparent" title="Reiniciar Microfone"><RefreshCcw className="w-5 h-5" /></button>
+                  </div>
+              </div>
+            )}
+
+            {sessionActive && (
+              <div className="absolute bottom-6 w-full max-w-4xl pointer-events-auto flex flex-col gap-4">
+                
+                <div className="glass-panel p-8 h-[30vh] overflow-y-auto flex flex-col gap-6 custom-scrollbar">
+                  {chat.length === 0 && <p className="text-center text-gray-400 font-display uppercase tracking-widest text-sm mt-10">Histórico Limpo</p>}
+                  {chat.map((msg, idx) => (
+                    <div key={idx} className={`flex flex-col ${msg.role === 'user' ? 'items-end' : 'items-start'}`}>
+                      <span className="text-[10px] font-display uppercase tracking-widest mb-2 px-3 py-1 rounded-full border border-white/10 text-gray-300 bg-white/5">{msg.role === 'user' ? 'Anthony' : 'I.A.X.O'}</span>
+                      {msg.images && msg.images.length > 0 && (
+                        <div className="flex gap-2 mb-2">
+                           {msg.images.map((img, i) => <img key={i} src={img} className="h-24 rounded-xl border border-white/20 shadow-lg object-cover" />)}
+                        </div>
+                      )}
+                      <p className={`font-light text-xl leading-relaxed max-w-[85%] ${msg.role === 'user' ? 'text-gray-300' : 'text-white'}`}>{msg.text}</p>
+                    </div>
+                  ))}
+                  <div ref={chatEndRef} />
+                </div>
+
+                <form onSubmit={handleManualSubmit} className="glass-panel !rounded-full p-2 pl-6 flex items-center gap-4 focus-within:border-yellow-500 transition-colors shadow-lg">
+                  <Keyboard className="w-6 h-6 text-gray-400" />
+                  <input type="text" value={inputText} onChange={(e) => setInputText(e.target.value)} placeholder="Preferir digitar? Use esta barra..." className="flex-1 bg-transparent text-white focus:outline-none text-xl font-light placeholder-gray-500" />
+                  <button type="submit" disabled={!inputText.trim()} className="p-4 bg-yellow-500 rounded-full text-black hover:scale-105 disabled:opacity-50 cursor-pointer transition-transform shadow-[0_0_15px_rgba(255,184,0,0.4)]"><Send className="w-5 h-5 ml-1" /></button>
+                </form>
+              </div>
+            )}
+          </div>
+        </div>
+      );
+    };
+
+    const App = () => {
+      const [currentView, setCurrentView] = useState('login');
+      const [user, setUser] = useState(null);
+      const [parentConfig, setParentConfig] = useState(null);
+      const [activeTheme, setActiveTheme] = useState(null);
+
+      useEffect(() => {
+        signInAnonymously(auth).catch(e => console.error("Erro Autenticação:", e));
+        return onAuthStateChanged(auth, setUser);
+      }, []);
+
+      useEffect(() => {
+        if (!user) return;
+        const fetchConfig = async () => {
+           try {
+             const docSnap = await getDoc(doc(db, 'parent_config', user.uid));
+             if (docSnap.exists()) {
+                setParentConfig(docSnap.data());
+                localStorage.setItem('parent_config', JSON.stringify(docSnap.data()));
+             }
+           } catch (e) {
+             const local = localStorage.getItem('parent_config');
+             if(local) setParentConfig(JSON.parse(local));
+           }
+        };
+        fetchConfig();
+      }, [user]);
+
+      return (
+        <React.Fragment>
+          <div className="dotted-matrix-bg"></div><div className="nebula-glow"></div>
+          <main className="relative z-10 w-full h-full min-h-screen">
+            {currentView === 'login' && <LoginView onLogin={setCurrentView} />}
+            {currentView === 'dashboard' && <DashboardView navigate={setCurrentView} />}
+            {currentView === 'parents' && <ParentsView navigate={setCurrentView} user={user} parentConfig={parentConfig} setParentConfig={setParentConfig} />}
+            {currentView === 'mural' && <StudentMuralView navigate={setCurrentView} user={user} setStartTheme={setActiveTheme} />}
+            {currentView === 'class' && <ClassroomView navigate={setCurrentView} user={user} parentConfig={parentConfig} activeTheme={activeTheme} />}
+          </main>
+        </React.Fragment>
+      );
+    };
+
+    const root = createRoot(document.getElementById('root'));
+    root.render(<App />);
+  </script>
+</body>
+</html>
